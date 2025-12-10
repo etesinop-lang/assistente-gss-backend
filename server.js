@@ -1,105 +1,73 @@
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import OpenAI from "openai";
 
 const app = express();
-
-// === MIDDLEWARES ===
 app.use(cors());
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-// === TESTE DE VIDA ===
-app.get("/", (req, res) => {
-  res.send("Assistente GSS Backend ✔️ ONLINE");
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-// === ENDPOINT PRINCIPAL DO CHAT ===
+// ID DO ASSISTENTE QUE VOCÊ CRIOU
+const ASSISTANT_ID = "asst_q7sE4luSibuvNqIo7prih343";
+
+app.get("/", (req, res) => {
+  res.send("Assistente GSS IA ✔️ ONLINE");
+});
+
 app.post("/mensagem", async (req, res) => {
   try {
-    const texto =
-      req.body.texto ||
-      req.body.mensagem ||
-      req.body.pergunta ||
-      "";
+    const mensagem = req.body.mensagem || req.body.texto || "";
 
-    const pergunta = texto.toLowerCase().trim();
-
-    console.log("📩 Mensagem recebida:", pergunta);
-
-    if (!pergunta) {
-      return res.json({
-        resposta: "Não consegui entender. Pode repetir a pergunta?"
-      });
+    if (!mensagem.trim()) {
+      return res.json({ resposta: "Pode repetir a pergunta? Não consegui entender." });
     }
 
-    let resposta = "Ainda estou aprendendo, mas já consigo ajudar com taxa mínima, titulardade, vazamento e parcelamentos.";
+    console.log("📩 Usuário perguntou:", mensagem);
 
-    // === TAXA MÍNIMA ===
-    if (pergunta.includes("taxa mínima") || pergunta.includes("taxa minima")) {
-      resposta = "A taxa mínima de água em Sinop é de R$ 48,59 (até 10 m³).";
-    }
+    // 🔹 1. Criar thread nova
+    const thread = await client.beta.threads.create();
 
-    // === PARCELAMENTO ===
-    else if (pergunta.includes("parcelamento") || pergunta.includes("parcela")) {
-      resposta =
-        "Em geral:\n• Água → até 5x\n• Esgoto → até 48x\nSempre confira no GSS se a matrícula atende aos critérios (valor mínimo, sem acordo ativo etc.).";
-    }
+    // 🔹 2. Inserir a mensagem do usuário
+    await client.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: mensagem
+    });
 
-    // === TROCA DE TITULARIDADE ===
-    else if (
-      pergunta.includes("troca de titularidade") ||
-      pergunta.includes("troca de nome") ||
-      (pergunta.includes("titularidade") && pergunta.includes("troca"))
-    ) {
-      resposta =
-        "Para troca de titularidade, é necessário:\n\n" +
-        "• Documento pessoal do novo titular\n" +
-        "• Contrato de locação ou compra/venda\n" +
-        "• Comprovar vínculo com o imóvel\n\n" +
-        "O atendente lança na tela de Consulta/Alteração de Cliente/Imóvel do GSS.";
-    }
+    // 🔹 3. Rodar o assistente IA
+    const run = await client.beta.threads.runs.create(thread.id, {
+      assistant_id: ASSISTANT_ID
+    });
 
-    // === VAZAMENTO ===
-    else if (pergunta.includes("vazamento")) {
-      resposta =
-        "Para desconto de vazamento:\n• Cliente precisa comprovar o reparo (nota, fotos, laudo)\n" +
-        "• Máximo de 2 descontos por ano\n" +
-        "• A solicitação é registrada no GSS para análise técnica.";
-    }
+    // 🔹 4. Aguardar a IA terminar
+    let status;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 600));
+      status = await client.beta.threads.runs.retrieve(thread.id, run.id);
+      console.log("⏳ Status:", status.status);
+    } while (status.status !== "completed");
 
-    // === ESGOTO ===
-    else if (pergunta.includes("esgoto")) {
-      resposta =
-        "A cobrança de esgoto segue a legislação local. Em áreas atendidas pela rede pública, a ligação é obrigatória. Em caso de dúvidas, consulte o Projeto de Adesão.";
-    }
+    // 🔹 5. Pegar mensagem final da IA
+    const mensagens = await client.beta.threads.messages.list(thread.id);
+    const respostaIA = mensagens.data[0].content[0].text.value;
 
-    // === CONSUMO EM M³ ===
-    else if (
-      pergunta.includes("m³") ||
-      pergunta.includes("m3") ||
-      pergunta.includes("cúbico") ||
-      pergunta.includes("cubico")
-    ) {
-      resposta =
-        "Até 10 m³ o cliente paga a taxa mínima. Acima disso, aplica-se tarifa progressiva por faixas. Você pode usar a calculadora interna para valores exatos.";
-    }
+    console.log("📤 Resposta IA:", respostaIA);
 
-    // RETORNO FINAL
-    console.log("📤 Enviando resposta:", resposta);
-
-    return res.json({ resposta });
+    return res.json({ resposta: respostaIA });
 
   } catch (erro) {
-    console.error("❌ ERRO NO /mensagem:", erro);
-    return res.status(500).json({
-      resposta: "Ocorreu um erro interno ao processar sua mensagem."
+    console.error("❌ ERRO NO SERVIDOR:", erro);
+    return res.json({
+      resposta: "Erro ao processar sua mensagem no assistente GSS."
     });
   }
 });
 
-// === INICIAR SERVIDOR ===
+// 🔹 INICIAR SERVIDOR
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 Servidor Assistente GSS rodando na porta " + PORT);
+  console.log("🚀 Assistente GSS rodando na porta " + PORT);
 });
