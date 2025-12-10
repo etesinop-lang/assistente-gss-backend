@@ -1,34 +1,47 @@
 import express from "express";
 import cors from "cors";
+import bodyParser from "body-parser";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-// === ENDPOINT DO CHAT COMPATÍVEL COM SUA EXTENSÃO ===
-app.post("/mensagem", (req, res) => {
-    const texto = req.body.texto?.toLowerCase() || "";
+// Libera CORS para permitir que a extensão use a API
+app.use(cors({
+  origin: "*",         // permite requisições de qualquer site
+  methods: "GET,POST", // libera POST (necessário para o chat)
+}));
 
-    let resposta = "Ainda estou aprendendo, mas já estou funcionando!";
+app.use(bodyParser.json());
 
-    if (texto.includes("taxa mínima")) {
-        resposta = "A taxa mínima de água em Sinop é R$ 48,59.";
-    } 
-    else if (texto.includes("parcelamento")) {
-        resposta = "Água parcela em até 5x. Esgoto parcela em até 48x.";
+// Endpoint do chat
+app.post("/mensagem", async (req, res) => {
+  try {
+    const { texto } = req.body;
+
+    if (!texto) {
+      return res.status(400).json({ erro: "Mensagem vazia." });
     }
-    else if (texto.includes("troca de titularidade")) {
-        resposta = "Para troca de titularidade, você precisa do contrato, documentos pessoais e estar sem débitos.";
-    }
 
-    res.json({ resposta });
+    console.log("Usuário disse:", texto);
+
+    // RESPOSTA SIMPLES SÓ PARA TESTAR
+    return res.json({
+      resposta: `Você escreveu: ${texto}`
+    });
+
+  } catch (error) {
+    console.error("Erro:", error);
+    res.status(500).json({ erro: "Falha interna no servidor." });
+  }
 });
 
-// === TESTE SIMPLES PARA SABER SE O BACKEND ESTÁ ONLINE ===
+// Rota básica para ver se está online
 app.get("/", (req, res) => {
-    res.send("Assistente GSS Backend ✔️ ONLINE");
+  res.send("Servidor do Assistente GSS está rodando!");
 });
 
-// === LIGA O SERVIDOR ===
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// Inicia o servidor
+app.listen(PORT, () => {
+  console.log(`Assistente GSS rodando na porta ${PORT}`);
+});
+
