@@ -1,13 +1,22 @@
 {
   "name": "assistente-gss-backend",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Backend do Assistente GSS IA",
   "main": "server.js",
+  "type": "module",
+
   "scripts": {
     "start": "node server.js"
   },
+
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "openai": "^4.28.4"
+  },
+
+  "engines": {
+    "node": "22.x"
   }
 }
