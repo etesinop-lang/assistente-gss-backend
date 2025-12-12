@@ -7,13 +7,13 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ===== OPENAI =====
+// ===== OPENAI (SÓ PROCEDIMENTOS) =====
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 const ASSISTANT_ID = "asst_q7sE4luSibuvNqIo7prih343";
 
-// ===== CONTEXTO =====
+// ===== CONTEXTO EM MEMÓRIA (SESSION) =====
 const contexto = {};
 
 // ===== TARIFAS =====
@@ -30,24 +30,27 @@ const tarifas = {
 const arred2 = v => Math.round(v * 100) / 100;
 
 const detectarConsumo = t => {
-  const m = t.match(/(\d+)\s*(m3|m³|cubicos|cúbicos)/);
+  const m = t.match(/(\d+)\s*(m3|m³|metro|metros|cubico|cúbico)/);
   return m ? parseInt(m[1]) : null;
 };
 
 const detectarCategoria = t => {
   if (t.includes("residencial")) return "residencial";
   if (t.includes("comercial")) return "comercial";
-  if (t.includes("pública") || t.includes("publica")) return "publica";
+  if (t.includes("publica") || t.includes("pública")) return "publica";
   if (t.includes("industrial")) return "industrial";
   if (t.includes("social")) return "social";
-  if (t.includes("vulnerável") || t.includes("vulneravel")) return "vulneravel";
+  if (t.includes("vulneravel") || t.includes("vulnerável")) return "vulneravel";
   return null;
 };
 
 const detectarPercentual = t => {
-  if (t.includes("80")) return 0.8;
-  if (t.includes("90")) return 0.9;
-  if (t.includes("100")) return 1;
+  if (/(^|\D)80(\D|$)/.test(t) || t.includes("80%") || t.includes("oitenta"))
+    return 0.8;
+  if (/(^|\D)90(\D|$)/.test(t) || t.includes("90%") || t.includes("noventa"))
+    return 0.9;
+  if (/(^|\D)100(\D|$)/.test(t) || t.includes("100%") || t.includes("cem"))
+    return 1;
   return null;
 };
 
@@ -62,31 +65,46 @@ function calcularAgua(consumo, categoria) {
     if (consumo > 20) total += t.f3 * Math.min(consumo - 20, 10);
     if (consumo > 30) total += t.f4 * (consumo - 30);
   }
+
   return arred2(total);
 }
 
 // ===== STATUS =====
-app.get("/", (_, res) => res.send("Assistente GSS IA ✔️ ONLINE"));
+app.get("/", (_, res) =>
+  res.send("Assistente GSS IA ✔️ ONLINE")
+);
 
 // ===== CHAT =====
 app.post("/mensagem", async (req, res) => {
   try {
     const texto = (req.body.mensagem || "").toLowerCase().trim();
-    if (!texto) return res.json({ resposta: "Repita a pergunta." });
+    const sessionId = req.body.sessionId;
 
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    if (!sessionId)
+      return res.json({ resposta: "Sessão inválida." });
+
+    if (!texto)
+      return res.json({ resposta: "Repita a pergunta." });
+
+    if (!contexto[sessionId])
+      contexto[sessionId] = {};
 
     const consumo = detectarConsumo(texto);
     const categoria = detectarCategoria(texto);
     const percentual = detectarPercentual(texto);
 
-    // 🔹 CASO 1 — CONSUMO + CATEGORIA + %
+    // ===== CASO 1 — CONSUMO + CATEGORIA + % =====
     if (consumo && categoria && percentual !== null) {
       const agua = calcularAgua(consumo, categoria);
       const esgoto = arred2(agua * percentual);
       const total = arred2(agua + esgoto);
 
-      contexto[ip] = { consumo, categoria, valorAgua: agua };
+      contexto[sessionId] = {
+        consumo,
+        categoria,
+        valorAgua: agua,
+        aguardando: null
+      };
 
       return res.json({
         resposta:
@@ -96,37 +114,58 @@ app.post("/mensagem", async (req, res) => {
       });
     }
 
-    // 🔹 CASO 2 — CONSUMO + CATEGORIA (SEM %)
+    // ===== CASO 2 — CONSUMO + CATEGORIA =====
     if (consumo && categoria) {
       const agua = calcularAgua(consumo, categoria);
-      contexto[ip] = { consumo, categoria, valorAgua: agua };
+
+      contexto[sessionId] = {
+        consumo,
+        categoria,
+        valorAgua: agua,
+        aguardando: "esgoto"
+      };
 
       return res.json({
-        resposta: `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto). Deseja incluir esgoto? (80%, 90% ou 100%)`
+        resposta:
+          `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto).\n` +
+          `Deseja incluir esgoto? (80%, 90% ou 100%)`
       });
     }
 
-    // 🔹 CASO 3 — ALTERAÇÃO DE ESGOTO (%)
-if (percentual !== null) {
-  if (!contexto[ip] || !contexto[ip].valorAgua) {
-    return res.json({ resposta: "Informe consumo e categoria." });
-  }
+    // ===== CASO 3 — % APÓS PERGUNTA =====
+    if (percentual !== null && contexto[sessionId].aguardando === "esgoto") {
+      const { valorAgua } = contexto[sessionId];
 
-  const { valorAgua } = contexto[ip];
-  const esgoto = arred2(valorAgua * percentual);
-  const total = arred2(valorAgua + esgoto);
+      const esgoto = arred2(valorAgua * percentual);
+      const total = arred2(valorAgua + esgoto);
 
-  return res.json({
-    resposta:
-      `Água: R$ ${valorAgua.toFixed(2)}\n` +
-      `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
-      `Total: R$ ${total.toFixed(2)}`
-  });
-}
+      contexto[sessionId].aguardando = null;
 
+      return res.json({
+        resposta:
+          `Água: R$ ${valorAgua.toFixed(2)}\n` +
+          `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
+          `Total: R$ ${total.toFixed(2)}`
+      });
+    }
 
-    // 🔹 IA (procedimentos)
+    // ===== BLOQUEIO DE CÁLCULO NA IA =====
+    if (
+      texto.match(/\d/) &&
+      (texto.includes("m3") ||
+        texto.includes("m³") ||
+        texto.includes("cubico") ||
+        texto.includes("%"))
+    ) {
+      return res.json({
+        resposta:
+          "Informe consumo (m³) e categoria para cálculo."
+      });
+    }
+
+    // ===== IA (SOMENTE PROCEDIMENTOS) =====
     const thread = await client.beta.threads.create();
+
     await client.beta.threads.messages.create(thread.id, {
       role: "user",
       content: texto
@@ -138,19 +177,25 @@ if (percentual !== null) {
 
     let status;
     do {
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 400));
       status = await client.beta.threads.runs.retrieve(thread.id, run.id);
     } while (status.status !== "completed");
 
     const msgs = await client.beta.threads.messages.list(thread.id);
-    return res.json({ resposta: msgs.data[0].content[0].text.value });
+
+    return res.json({
+      resposta: msgs.data[0].content[0].text.value
+    });
 
   } catch (e) {
     console.error(e);
-    return res.json({ resposta: "Erro interno no Assistente GSS." });
+    return res.json({
+      resposta: "Erro interno no Assistente GSS."
+    });
   }
 });
 
+// ===== START =====
 app.listen(process.env.PORT || 3000, () =>
-  console.log("🚀 Assistente GSS rodando")
+  console.log("🚀 Assistente GSS rodando (estável)")
 );
