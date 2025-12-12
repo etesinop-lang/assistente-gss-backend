@@ -38,13 +38,19 @@ function detectarConsumo(texto) {
 }
 
 function detectarCategoria(texto) {
-  texto = texto.toLowerCase();
   if (texto.includes("residencial")) return "residencial";
   if (texto.includes("comercial")) return "comercial";
   if (texto.includes("pública") || texto.includes("publica")) return "publica";
   if (texto.includes("industrial")) return "industrial";
   if (texto.includes("social")) return "social";
   if (texto.includes("vulnerável") || texto.includes("vulneravel")) return "vulneravel";
+  return null;
+}
+
+function detectarPercentualEsgoto(texto) {
+  if (texto.includes("80")) return 0.8;
+  if (texto.includes("90")) return 0.9;
+  if (texto.includes("100")) return 1;
   return null;
 }
 
@@ -80,6 +86,7 @@ app.post("/mensagem", async (req, res) => {
 
     const consumo = detectarConsumo(texto);
     const categoria = detectarCategoria(texto);
+    const percentual = detectarPercentualEsgoto(texto);
 
     // 🔹 1. PEDIU CÁLCULO SEM CATEGORIA
     if (consumo && !categoria) {
@@ -103,21 +110,24 @@ app.post("/mensagem", async (req, res) => {
       });
     }
 
-    // 🔹 3. APLICAÇÃO DE ESGOTO
-    if (texto.includes("80") || texto.includes("90") || texto.includes("100")) {
-      const pct = texto.includes("80") ? 0.8 : texto.includes("90") ? 0.9 : 1;
-
+    // 🔹 3. CONFIRMAÇÃO / CÁLCULO DE ESGOTO
+    if (
+      percentual !== null ||
+      texto === "sim" ||
+      texto.includes("esgoto")
+    ) {
       if (!contexto[ip]) {
         return res.json({
           resposta: "Informe consumo e categoria para cálculo."
         });
       }
 
+      const pct = percentual ?? 0.8; // "sim" = 80%
       const { valorAgua } = contexto[ip];
+
       const valorEsgoto = arred2(valorAgua * pct);
       const total = arred2(valorAgua + valorEsgoto);
 
-      // limpa contexto após cálculo
       delete contexto[ip];
 
       return res.json({
