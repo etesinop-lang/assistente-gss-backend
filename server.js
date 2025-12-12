@@ -13,7 +13,7 @@ const client = new OpenAI({
 });
 const ASSISTANT_ID = "asst_q7sE4luSibuvNqIo7prih343";
 
-// ===== CONTEXTO EM MEMÓRIA (SESSION) =====
+// ===== CONTEXTO POR SESSÃO =====
 const contexto = {};
 
 // ===== TARIFAS =====
@@ -45,14 +45,27 @@ const detectarCategoria = t => {
 };
 
 const detectarPercentual = t => {
-  if (/(^|\D)80(\D|$)/.test(t) || t.includes("80%") || t.includes("oitenta"))
-    return 0.8;
-  if (/(^|\D)90(\D|$)/.test(t) || t.includes("90%") || t.includes("noventa"))
-    return 0.9;
-  if (/(^|\D)100(\D|$)/.test(t) || t.includes("100%") || t.includes("cem"))
-    return 1;
+  if (/(^|\D)80(\D|$)/.test(t) || t.includes("80%") || t.includes("oitenta")) return 0.8;
+  if (/(^|\D)90(\D|$)/.test(t) || t.includes("90%") || t.includes("noventa")) return 0.9;
+  if (/(^|\D)100(\D|$)/.test(t) || t.includes("100%") || t.includes("cem")) return 1;
   return null;
 };
+
+// 👉 INTENÇÃO NEGATIVA (VENCE TUDO)
+const detectarSemEsgoto = t =>
+  t.includes("sem esgoto") ||
+  t.includes("agua apenas") ||
+  t.includes("água apenas") ||
+  t.includes("não quero esgoto") ||
+  t.includes("nao quero esgoto") ||
+  t.includes("sem rede") ||
+  t.includes("nao tem esgoto");
+
+// 👉 INTENÇÃO POSITIVA EXPLÍCITA
+const detectarQuerEsgoto = t =>
+  t.includes("com esgoto") ||
+  t.includes("quero esgoto") ||
+  t.includes("incluir esgoto");
 
 function calcularAgua(consumo, categoria) {
   const t = tarifas[categoria];
@@ -92,11 +105,31 @@ app.post("/mensagem", async (req, res) => {
     const consumo = detectarConsumo(texto);
     const categoria = detectarCategoria(texto);
     const percentual = detectarPercentual(texto);
+    const semEsgoto = detectarSemEsgoto(texto);
+    const querEsgoto = detectarQuerEsgoto(texto);
 
     /* ======================================================
-       CASO 1 — CONSUMO + CATEGORIA + %
+       NOVO CONSUMO SEM ESGOTO (TRAVA ESGOTO)
        ====================================================== */
-    if (consumo && categoria && percentual !== null) {
+    if (consumo && categoria && semEsgoto) {
+      const agua = calcularAgua(consumo, categoria);
+
+      contexto[sessionId] = {
+        consumo,
+        categoria,
+        valorAgua: agua,
+        esgotoBloqueado: true
+      };
+
+      return res.json({
+        resposta: `Água: R$ ${agua.toFixed(2)} (sem esgoto)`
+      });
+    }
+
+    /* ======================================================
+       CONSUMO + CATEGORIA + %
+       ====================================================== */
+    if (consumo && categoria && percentual !== null && !semEsgoto) {
       const agua = calcularAgua(consumo, categoria);
       const esgoto = arred2(agua * percentual);
       const total = arred2(agua + esgoto);
@@ -104,7 +137,8 @@ app.post("/mensagem", async (req, res) => {
       contexto[sessionId] = {
         consumo,
         categoria,
-        valorAgua: agua
+        valorAgua: agua,
+        esgotoBloqueado: false
       };
 
       return res.json({
@@ -116,7 +150,7 @@ app.post("/mensagem", async (req, res) => {
     }
 
     /* ======================================================
-       CASO 2 — CONSUMO + CATEGORIA (SEM ESGOTO)
+       CONSUMO + CATEGORIA (PERGUNTA ESGOTO)
        ====================================================== */
     if (consumo && categoria) {
       const agua = calcularAgua(consumo, categoria);
@@ -124,7 +158,8 @@ app.post("/mensagem", async (req, res) => {
       contexto[sessionId] = {
         consumo,
         categoria,
-        valorAgua: agua
+        valorAgua: agua,
+        esgotoBloqueado: false
       };
 
       return res.json({
@@ -135,7 +170,7 @@ app.post("/mensagem", async (req, res) => {
     }
 
     /* ======================================================
-       CASO 3 — % ISOLADO (REAPLICÁVEL SEMPRE)
+       % ISOLADO (REAPLICAÇÃO)
        ====================================================== */
     if (percentual !== null) {
       const ctx = contexto[sessionId];
@@ -146,8 +181,16 @@ app.post("/mensagem", async (req, res) => {
         });
       }
 
+      if (ctx.esgotoBloqueado && !querEsgoto) {
+        return res.json({
+          resposta: "Este cálculo foi definido como SEM ESGOTO."
+        });
+      }
+
       const esgoto = arred2(ctx.valorAgua * percentual);
       const total = arred2(ctx.valorAgua + esgoto);
+
+      ctx.esgotoBloqueado = false;
 
       return res.json({
         resposta:
@@ -170,7 +213,6 @@ app.post("/mensagem", async (req, res) => {
        IA — SOMENTE PROCEDIMENTOS
        ====================================================== */
     const thread = await client.beta.threads.create();
-
     await client.beta.threads.messages.create(thread.id, {
       role: "user",
       content: texto
@@ -202,5 +244,5 @@ app.post("/mensagem", async (req, res) => {
 
 // ===== START =====
 app.listen(process.env.PORT || 3000, () =>
-  console.log("🚀 Assistente GSS rodando (final)")
+  console.log("🚀 Assistente GSS rodando (final definitivo)")
 );
