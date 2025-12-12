@@ -93,7 +93,9 @@ app.post("/mensagem", async (req, res) => {
     const categoria = detectarCategoria(texto);
     const percentual = detectarPercentual(texto);
 
-    // ===== CASO 1 — CONSUMO + CATEGORIA + % =====
+    /* ======================================================
+       CASO 1 — CONSUMO + CATEGORIA + %
+       ====================================================== */
     if (consumo && categoria && percentual !== null) {
       const agua = calcularAgua(consumo, categoria);
       const esgoto = arred2(agua * percentual);
@@ -102,8 +104,7 @@ app.post("/mensagem", async (req, res) => {
       contexto[sessionId] = {
         consumo,
         categoria,
-        valorAgua: agua,
-        aguardando: null
+        valorAgua: agua
       };
 
       return res.json({
@@ -114,64 +115,60 @@ app.post("/mensagem", async (req, res) => {
       });
     }
 
-    // ===== CASO 2 — CONSUMO + CATEGORIA =====
-if (consumo && categoria) {
-  const agua = calcularAgua(consumo, categoria);
+    /* ======================================================
+       CASO 2 — CONSUMO + CATEGORIA (SEM ESGOTO)
+       ====================================================== */
+    if (consumo && categoria) {
+      const agua = calcularAgua(consumo, categoria);
 
-  contexto[sessionId] = {
-    consumo,
-    categoria,
-    valorAgua: agua,
-    aguardandoEsgoto: true
-  };
-
-  return res.json({
-    resposta:
-      `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto).\n` +
-      `Deseja incluir esgoto? (80%, 90% ou 100%)`
-  });
-}
-
-
-    // ===== CASO 3 — % APÓS PERGUNTA =====
-    if (percentual !== null && contexto[sessionId].aguardando === "esgoto") {
-      const { valorAgua } = contexto[sessionId];
-
-      const esgoto = arred2(valorAgua * percentual);
-      const total = arred2(valorAgua + esgoto);
-
-      contexto[sessionId].aguardando = null;
+      contexto[sessionId] = {
+        consumo,
+        categoria,
+        valorAgua: agua
+      };
 
       return res.json({
         resposta:
-          `Água: R$ ${valorAgua.toFixed(2)}\n` +
+          `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto).\n` +
+          `Deseja incluir esgoto? (80%, 90% ou 100%)`
+      });
+    }
+
+    /* ======================================================
+       CASO 3 — % ISOLADO (REAPLICÁVEL SEMPRE)
+       ====================================================== */
+    if (percentual !== null) {
+      const ctx = contexto[sessionId];
+
+      if (!ctx || !ctx.valorAgua) {
+        return res.json({
+          resposta: "Informe consumo (m³) e categoria para cálculo."
+        });
+      }
+
+      const esgoto = arred2(ctx.valorAgua * percentual);
+      const total = arred2(ctx.valorAgua + esgoto);
+
+      return res.json({
+        resposta:
+          `Água: R$ ${ctx.valorAgua.toFixed(2)}\n` +
           `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
           `Total: R$ ${total.toFixed(2)}`
       });
     }
 
-    // ===== % ISOLADO (REAPLICÁVEL) =====
-if (percentual !== null) {
-  if (!contexto[sessionId]?.valorAgua) {
-    return res.json({
-      resposta: "Informe consumo (m³) e categoria para cálculo."
-    });
-  }
+    /* ======================================================
+       BLOQUEIO DE CÁLCULO NA IA
+       ====================================================== */
+    if (texto.match(/\d/)) {
+      return res.json({
+        resposta: "Informe consumo (m³) e categoria para cálculo."
+      });
+    }
 
-  const { valorAgua } = contexto[sessionId];
-  const esgoto = arred2(valorAgua * percentual);
-  const total = arred2(valorAgua + esgoto);
-
-  return res.json({
-    resposta:
-      `Água: R$ ${valorAgua.toFixed(2)}\n` +
-      `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
-      `Total: R$ ${total.toFixed(2)}`
-  });
-}
-
-
-    // ===== IA (SOMENTE PROCEDIMENTOS) =====
+    /* ======================================================
+       IA — SOMENTE PROCEDIMENTOS
+       ====================================================== */
     const thread = await client.beta.threads.create();
 
     await client.beta.threads.messages.create(thread.id, {
@@ -205,5 +202,5 @@ if (percentual !== null) {
 
 // ===== START =====
 app.listen(process.env.PORT || 3000, () =>
-  console.log("🚀 Assistente GSS rodando (estável)")
+  console.log("🚀 Assistente GSS rodando (final)")
 );
