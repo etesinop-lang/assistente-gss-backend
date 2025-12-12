@@ -115,22 +115,23 @@ app.post("/mensagem", async (req, res) => {
     }
 
     // ===== CASO 2 — CONSUMO + CATEGORIA =====
-    if (consumo && categoria) {
-      const agua = calcularAgua(consumo, categoria);
+if (consumo && categoria) {
+  const agua = calcularAgua(consumo, categoria);
 
-      contexto[sessionId] = {
-        consumo,
-        categoria,
-        valorAgua: agua,
-        aguardando: "esgoto"
-      };
+  contexto[sessionId] = {
+    consumo,
+    categoria,
+    valorAgua: agua,
+    aguardandoEsgoto: true
+  };
 
-      return res.json({
-        resposta:
-          `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto).\n` +
-          `Deseja incluir esgoto? (80%, 90% ou 100%)`
-      });
-    }
+  return res.json({
+    resposta:
+      `${consumo} m³ ${categoria}: R$ ${agua.toFixed(2)} (sem esgoto).\n` +
+      `Deseja incluir esgoto? (80%, 90% ou 100%)`
+  });
+}
+
 
     // ===== CASO 3 — % APÓS PERGUNTA =====
     if (percentual !== null && contexto[sessionId].aguardando === "esgoto") {
@@ -149,19 +150,26 @@ app.post("/mensagem", async (req, res) => {
       });
     }
 
-    // ===== BLOQUEIO DE CÁLCULO NA IA =====
-    if (
-      texto.match(/\d/) &&
-      (texto.includes("m3") ||
-        texto.includes("m³") ||
-        texto.includes("cubico") ||
-        texto.includes("%"))
-    ) {
-      return res.json({
-        resposta:
-          "Informe consumo (m³) e categoria para cálculo."
-      });
-    }
+    // ===== % ISOLADO (REAPLICÁVEL) =====
+if (percentual !== null) {
+  if (!contexto[sessionId]?.valorAgua) {
+    return res.json({
+      resposta: "Informe consumo (m³) e categoria para cálculo."
+    });
+  }
+
+  const { valorAgua } = contexto[sessionId];
+  const esgoto = arred2(valorAgua * percentual);
+  const total = arred2(valorAgua + esgoto);
+
+  return res.json({
+    resposta:
+      `Água: R$ ${valorAgua.toFixed(2)}\n` +
+      `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
+      `Total: R$ ${total.toFixed(2)}`
+  });
+}
+
 
     // ===== IA (SOMENTE PROCEDIMENTOS) =====
     const thread = await client.beta.threads.create();
