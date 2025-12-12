@@ -106,25 +106,24 @@ app.post("/mensagem", async (req, res) => {
       });
     }
 
-    // 🔹 CASO 3 — SÓ %
-    if (percentual !== null || texto === "sim" || texto.includes("esgoto")) {
-      if (!contexto[ip]) {
-        return res.json({ resposta: "Informe consumo e categoria." });
-      }
+    // 🔹 CASO 3 — ALTERAÇÃO DE ESGOTO (%)
+if (percentual !== null) {
+  if (!contexto[ip] || !contexto[ip].valorAgua) {
+    return res.json({ resposta: "Informe consumo e categoria." });
+  }
 
-      const pct = percentual ?? 0.8;
-      const { valorAgua } = contexto[ip];
+  const { valorAgua } = contexto[ip];
+  const esgoto = arred2(valorAgua * percentual);
+  const total = arred2(valorAgua + esgoto);
 
-      const esgoto = arred2(valorAgua * pct);
-      const total = arred2(valorAgua + esgoto);
+  return res.json({
+    resposta:
+      `Água: R$ ${valorAgua.toFixed(2)}\n` +
+      `Esgoto (${percentual * 100}%): R$ ${esgoto.toFixed(2)}\n` +
+      `Total: R$ ${total.toFixed(2)}`
+  });
+}
 
-      return res.json({
-        resposta:
-          `Água: R$ ${valorAgua.toFixed(2)}\n` +
-          `Esgoto (${pct * 100}%): R$ ${esgoto.toFixed(2)}\n` +
-          `Total: R$ ${total.toFixed(2)}`
-      });
-    }
 
     // 🔹 IA (procedimentos)
     const thread = await client.beta.threads.create();
