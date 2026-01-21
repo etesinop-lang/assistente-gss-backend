@@ -16,14 +16,24 @@ const ASSISTANT_ID = "asst_q7sE4luSibuvNqIo7prih343";
 // ===== CONTEXTO POR SESSÃO =====
 const contexto = {};
 
-// ===== TARIFAS DE CONSUMO =====
-const tarifas = {
-  residencial: { f1: 5.402, f2: 7.671, f3: 12.857, f4: 16.098 },
-  social:      { f1: 2.701, f2: 3.835, f3: 12.857, f4: 16.098 },
-  vulneravel:  { f1: 1.999, f2: 2.863, f3: 12.857, f4: 16.098 },
-  comercial:   { f1: 11.020, f2: 18.313 },
-  publica:     { f1: 16.098, f2: 26.416 },
-  industrial:  { f1: 11.020, f2: 18.313 }
+// ===== TARIFAS DE CONSUMO (POR ANO) =====
+const tarifasPorAno = {
+  2025: {
+    residencial: { f1: 5.402, f2: 7.671, f3: 12.857, f4: 16.098 },
+    social:      { f1: 2.701, f2: 3.835, f3: 12.857, f4: 16.098 },
+    vulneravel:  { f1: 1.999, f2: 2.863, f3: 12.857, f4: 16.098 },
+    comercial:   { f1: 11.020, f2: 18.313 },
+    publica:     { f1: 16.098, f2: 26.416 },
+    industrial:  { f1: 11.020, f2: 18.313 }
+  },
+  2026: {
+    residencial: { f1: 5.510, f2: 7.824, f3: 13.114, f4: 16.420 },
+    social:      { f1: 2.755, f2: 3.912, f3: 13.114, f4: 16.420 },
+    vulneravel:  { f1: 2.039, f2: 2.920, f3: 13.114, f4: 16.420 },
+    comercial:   { f1: 11.240, f2: 18.679 },
+    publica:     { f1: 16.420, f2: 26.944 },
+    industrial:  { f1: 11.240, f2: 18.679 }
+  }
 };
 
 // ===== PROCEDIMENTOS (ORDEM DE SERVIÇO) =====
@@ -59,7 +69,7 @@ const arred2 = v => Math.round(v * 100) / 100;
 
 const detectarConsumo = t => {
   const m = t.match(/(\d+)\s*(m3|m³|metro|metros|cubico|cúbico)/);
-  return m ? parseInt(m[1]) : null;
+  return m ? parseInt(m[1], 10) : null;
 };
 
 const detectarCategoria = t => {
@@ -70,6 +80,11 @@ const detectarCategoria = t => {
   if (t.includes("social")) return "social";
   if (t.includes("vulneravel") || t.includes("vulnerável")) return "vulneravel";
   return null;
+};
+
+const detectarAno = t => {
+  const m = t.match(/\b(2025|2026)\b/);
+  return m ? parseInt(m[1], 10) : null;
 };
 
 const detectarPercentual = t => {
@@ -88,19 +103,37 @@ const detectarProcedimento = t => {
   return null;
 };
 
-const calcularAgua = (consumo, categoria) => {
-  const t = tarifas[categoria];
-  let total = t.f1 * 10;
+// ===== CÁLCULO ÁGUA (COM ANO + REGRA SOCIAL/VULNERÁVEL > 20) =====
+const calcularAgua = (consumo, categoria, ano) => {
+  const tab = tarifasPorAno[ano];
+  if (!tab) return null;
 
-  if (["comercial", "publica", "industrial"].includes(categoria)) {
-    if (consumo > 10) total += t.f2 * (consumo - 10);
-  } else {
-    if (consumo > 10) total += t.f2 * Math.min(consumo - 10, 10);
-    if (consumo > 20) total += t.f3 * Math.min(consumo - 20, 10);
-    if (consumo > 30) total += t.f4 * (consumo - 30);
-  }
+  const isSoc = (categoria === "social" || categoria === "vulneravel");
 
-  return arred2(total);
+  const calcCat = (cons, cat) => {
+    const t = tab[cat];
+    let total = t.f1 * 10;
+
+    if (["comercial", "publica", "industrial"].includes(cat)) {
+      if (cons > 10) total += t.f2 * (cons - 10);
+    } else {
+      if (cons > 10) total += t.f2 * Math.min(cons - 10, 10);
+      if (cons > 20) total += t.f3 * Math.min(cons - 20, 10);
+      if (cons > 30) total += t.f4 * (cons - 30);
+    }
+
+    return arred2(total);
+  };
+
+  // Até 20 (ou categorias normais): calcula direto
+  if (!isSoc || consumo <= 20) return calcCat(consumo, categoria);
+
+  // Acima de 20: 0-20 social/vulnerável + excedente residencial
+  const parte020 = calcCat(20, categoria);
+  const resTotal = calcCat(consumo, "residencial");
+  const resAte20 = calcCat(20, "residencial");
+
+  return arred2(parte020 + (resTotal - resAte20));
 };
 
 // ===== STATUS =====
@@ -175,18 +208,24 @@ app.post("/mensagem", async (req, res) => {
     }
 
     /* ======================================================
-       CONSUMO DE ÁGUA (motor já existente)
+       CONSUMO DE ÁGUA (motor)
        ====================================================== */
     const consumo = detectarConsumo(texto);
     const categoria = detectarCategoria(texto);
     const percentual = detectarPercentual(texto);
+    const ano = detectarAno(texto);
+
+    // HARD LOCK: se tem consumo e não informou ano, não calcula
+    if (consumo && !ano) {
+      return res.json({ resposta: "Informe o ano da tarifa (2025 ou 2026)." });
+    }
 
     if (consumo && categoria && percentual !== null) {
-      const agua = calcularAgua(consumo, categoria);
+      const agua = calcularAgua(consumo, categoria, ano);
       const esgoto = arred2(agua * percentual);
       const total = arred2(agua + esgoto);
 
-      contexto[sessionId] = { consumo, categoria, valorAgua: agua };
+      contexto[sessionId] = { consumo, categoria, ano, valorAgua: agua };
 
       return res.json({
         resposta:
@@ -197,8 +236,8 @@ app.post("/mensagem", async (req, res) => {
     }
 
     if (consumo && categoria) {
-      const agua = calcularAgua(consumo, categoria);
-      contexto[sessionId] = { consumo, categoria, valorAgua: agua };
+      const agua = calcularAgua(consumo, categoria, ano);
+      contexto[sessionId] = { consumo, categoria, ano, valorAgua: agua };
 
       return res.json({
         resposta:
